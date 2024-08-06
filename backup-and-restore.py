@@ -19,36 +19,39 @@ def mysql_connection(hname, uname, pwd):
     global cursor
     global conn_gui
 
-    con=sql.connect(host=hname, user=uname, passwd=pwd)
-    cursor=con.cursor()
+    try:
+        con=sql.connect(host=hname, user=uname, passwd=pwd)
+        cursor=con.cursor()
 
-    create_database="CREATE DATABASE IF NOT EXISTS backup_restore"
+        create_database="CREATE DATABASE IF NOT EXISTS backup_restore"
 
-    cursor.execute(create_database)
-    cursor.execute("USE backup_restore")
+        cursor.execute(create_database)
+        cursor.execute("USE backup_restore")
 
-    create_info_table='''CREATE TABLE IF NOT EXISTS backup_info(
-    Backup_ID int primary key auto_increment,
-    Date datetime NOT NULL,
-    Backup_Name varchar(255),
-    Source_Path mediumblob NOT NULL,
-    Backup_Path mediumblob NOT NULL,
-    Total_Size bigint NOT NULL)'''
+        create_info_table='''CREATE TABLE IF NOT EXISTS backup_info(
+        Backup_ID int primary key auto_increment,
+        Date datetime NOT NULL,
+        Backup_Name varchar(255),
+        Source_Path mediumblob NOT NULL,
+        Backup_Path mediumblob NOT NULL,
+        Total_Size bigint NOT NULL)'''
 
-    create_backup_table='''CREATE TABLE IF NOT EXISTS backup_files(
-    Backup_ID int references backup_info(Backup_ID),
-    File_Name blob NOT NULL,
-    File_Type varchar(255) NOT NULL,
-    File_Size bigint NOT NULL
-    )'''
+        create_backup_table='''CREATE TABLE IF NOT EXISTS backup_files(
+        Backup_ID int references backup_info(Backup_ID),
+        File_Name blob NOT NULL,
+        File_Type varchar(255) NOT NULL,
+        File_Size bigint NOT NULL
+        )'''
 
-    cursor.execute(create_info_table)
-    cursor.execute(create_backup_table)
-    con.commit()
+        cursor.execute(create_info_table)
+        cursor.execute(create_backup_table)
+        con.commit()
 
-    if con.is_connected():
-        messagebox.showinfo("Success", '''Successfully connected to MySQL Database!\nNow you may take backups or restore from backups!''')
-        conn_gui.destroy()
+        if con.is_connected():
+            messagebox.showinfo("Success", "Successfully connected to MySQL Database!\nNow you may take backups or restore from backups!")
+            conn_gui.destroy()
+    except:
+        messagebox.showerror("Failed", "Couldn't connect to MySQL database.\nPlease Try Again!")
 
 def connection_gui():
 
@@ -78,14 +81,14 @@ def connection_gui():
     conn_button=tk.Button(conn_gui, text="Connect to Database", command=collect_and_connect)
     conn_button.grid(row=4, columnspan=2, pady=15)
 
-def backup():
+def backup_utility():
 
     global con
     
     # con will have None value if connection was never established
     # con.is_connected()==False will be True if connection was tried to be established but failed to take place for some reason
     if con is None or con.is_connected()==False:
-        messagebox.showinfo("Error", "Kindly Connect to MySQL Database first!")
+        messagebox.showwarning("Error", "Kindly Connect to MySQL Database first!")
         connection_gui()
 
     else:
@@ -103,6 +106,35 @@ def backup():
         src_entry.grid(row=0, column=1, padx=10, pady=10)
         dest_entry.grid(row=1, column=1, padx=10, pady=10)
         name_entry.grid(row=2, column=1, padx=10, pady=10)
+
+        def browse_src_path():
+            src_entry.delete(0)
+            src_entry.insert(0, filedialog.askdirectory())
+
+        def browse_dest_path():
+            dest_entry.delete(0)
+            dest_entry.insert(0, filedialog.askdirectory())
+
+        src_browse = tk.Button(backup_gui, text="Browse", command=browse_src_path)
+        src_browse.grid(row=0, column=2, padx=10, pady=10)
+
+        dest_browse = tk.Button(backup_gui, text="Browse", command=browse_dest_path)
+        dest_browse.grid(row=1, column=2, padx=10, pady=10)
+
+        def backup():
+            src_path = src_entry.get()
+            dest_path = dest_entry.get()
+            name = name_entry.get()
+
+            if not src_path or not dest_path:
+                messagebox.showerror("Error", "Source Path and Destination Path are required!")
+            
+            else:
+                backup_time = datetime.datetime.now()
+
+
+        backup_button = tk.Button(backup_gui, text="Start Backup", command=backup)
+        backup_button.grid(row=4, columnspan=3, pady=10)
     
 
 # Creating the main tKinter window
@@ -110,16 +142,16 @@ root=tk.Tk()
 root.title("Backup and Restore")
 
 # Add all the required buttons into the main window
-connect_button=tk.Button(root, text="Connect To MySQL Database", command=connection_gui)
+connect_button = tk.Button(root, text="Connect To MySQL Database", command=connection_gui)
 connect_button.pack(padx=30, pady=10)
 
-backup_button=tk.Button(root, text="Backup Files", command=backup)
-backup_button.pack(padx=30, pady=10)
+backup_utility_button = tk.Button(root, text="Backup Files", command=backup_utility)
+backup_utility_button.pack(padx=30, pady=10)
 
-restore_button=tk.Button(root, text="Restore from Backup")
+restore_button = tk.Button(root, text="Restore from Backup")
 restore_button.pack(padx=30, pady=10)
 
-info_button=tk.Button(root, text="Statistics")
+info_button = tk.Button(root, text="Statistics")
 info_button.pack(padx=30, pady=10)
 
 root.mainloop()
