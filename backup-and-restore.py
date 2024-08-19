@@ -5,7 +5,6 @@ import threading
 import datetime
 import shutil
 import os
-import numpy as np
 import matplotlib.pyplot as plt
 
 # Defining these as global variables as they would be used across many functions
@@ -50,7 +49,83 @@ def mysql_connection(hname, uname, pwd):
     except:
         messagebox.showerror("Failed", "Couldn't connect to MySQL database.\nPlease Try Again!")
 
-def connection_gui():
+def backup(src_entry, dest_entry, name_entry):
+    src_path = src_entry.get()
+    dest_path = dest_entry.get()
+    name = name_entry.get()
+
+    if not src_path or not dest_path or not name:
+        messagebox.showerror("Error", "All Fields are required!")
+
+    else:
+        backup_time = str(datetime.datetime.now())[:19]
+        total_size = 0
+
+        try:
+            dest_path = dest_path + r"/" + name
+            for dirpath, dirnames, filenames in os.walk(src_path):
+                for file in filenames:
+                    file_path = os.path.join(dirpath, file)
+                    total_size += os.path.getsize(file_path)
+
+            
+            insert_backup_info = f'''insert into backup_info(Date, Backup_Name, Source_Path, Backup_Path, Total_Size)
+            values('{backup_time}', '{name}', '{src_path}', '{dest_path}', {total_size})'''
+
+            cursor.execute(insert_backup_info)
+            con.commit()
+
+            backup_id = cursor.lastrowid
+
+            for dirpath, dirnames, filenames in os.walk(src_path):
+                for file in filenames:
+                    file_path = os.path.normpath(os.path.join(dirpath, file))
+                    rel_path = os.path.relpath(file_path, src_path)
+                    dest_file_path = os.path.normpath(os.path.join(dest_path, rel_path))
+
+                    if not os.path.exists(os.path.dirname(dest_file_path)):
+                        os.makedirs(os.path.dirname(dest_file_path))
+
+                    shutil.copy2(file_path, dest_file_path)
+                    file_size = os.path.getsize(file_path)
+
+                    # Insert file details into the database
+                    # We used %s paramtering because .format and f' ' was not handling the file path correctly
+                    # It was not including the slashes properly while inserting into the database
+                    file_type = os.path.splitext(file)[1]
+                    insert_file_info = '''INSERT INTO backup_files(Backup_ID, File_Name, File_Type, File_Size, File_Path) 
+                    VALUES(%s, %s, %s, %s, %s)'''
+
+                    cursor.execute(insert_file_info, (backup_id, file, file_type, file_size, file_path))
+
+                    con.commit()
+
+            messagebox.showinfo("Success", f"Backup completed successfully!\nTotal size: {total_size/(1024*1024)} MB")
+
+        except Exception as e:
+            con.rollback()
+            messagebox.showerror("Error", f"An error occurred during backup: {str(e)}")
+
+def restore(restore_id, dest_entry):
+    cursor.execute(f'SELECT source_path from backup_info where backup_id={restore_id}')
+
+    src_path=str(cursor.fetchone()[0])
+    dest_path=str(os.path.normpath(dest_entry.get())) + "\\" + src_path.split('/')[-1]
+
+    for dirpath, dirnames, filenames in os.walk(src_path):
+        for file in filenames:
+            file_path = os.path.normpath(os.path.join(dirpath, file))
+            rel_path = os.path.relpath(file_path, src_path)
+            dest_file_path = os.path.normpath(os.path.join(dest_path, rel_path))
+
+            if not os.path.exists(os.path.dirname(dest_file_path)):
+                os.makedirs(os.path.dirname(dest_file_path))
+
+            shutil.copy2(file_path, dest_file_path) 
+    
+    messagebox.showinfo("Success", f"Restore completed successfully!")
+
+def connection_utility():
     global conn_gui
 
     conn_gui = tk.Tk()
@@ -84,7 +159,7 @@ def backup_utility():
     # con.is_connected()==False will be True if connection was tried to be established but failed to take place for some reason
     if con is None or not con.is_connected():
         messagebox.showwarning("Error", "Kindly Connect to MySQL Database first!")
-        connection_gui()
+        connection_utility()
     else:
         backup_gui = tk.Tk()
         backup_gui.title("Backup Files")
@@ -115,64 +190,10 @@ def backup_utility():
         dest_browse = tk.Button(backup_gui, text="Browse", command=browse_dest_path)
         dest_browse.grid(row=1, column=2, padx=10, pady=10)
 
-        def backup():
-            src_path = src_entry.get()
-            dest_path = dest_entry.get()
-            name = name_entry.get()
+        def call_backup():
+            backup(src_entry, dest_entry, name_entry)
 
-            if not src_path or not dest_path or not name:
-                messagebox.showerror("Error", "All Fields are required!")
-
-            else:
-                backup_time = str(datetime.datetime.now())[:19]
-                total_size = 0
-
-                try:
-                    dest_path = dest_path + r"/" + name
-                    for dirpath, dirnames, filenames in os.walk(src_path):
-                        for file in filenames:
-                            file_path = os.path.join(dirpath, file)
-                            total_size += os.path.getsize(file_path)
-
-                    
-                    insert_backup_info = f'''insert into backup_info(Date, Backup_Name, Source_Path, Backup_Path, Total_Size)
-                    values('{backup_time}', '{name}', '{src_path}', '{dest_path}', {total_size})'''
-
-                    cursor.execute(insert_backup_info)
-                    con.commit()
-
-                    backup_id = cursor.lastrowid
-
-                    for dirpath, dirnames, filenames in os.walk(src_path):
-                        for file in filenames:
-                            file_path = os.path.normpath(os.path.join(dirpath, file))
-                            rel_path = os.path.relpath(file_path, src_path)
-                            dest_file_path = os.path.normpath(os.path.join(dest_path, rel_path))
-
-                            if not os.path.exists(os.path.dirname(dest_file_path)):
-                                os.makedirs(os.path.dirname(dest_file_path))
-
-                            shutil.copy2(file_path, dest_file_path)
-                            file_size = os.path.getsize(file_path)
-
-                            # Insert file details into the database
-                            # We used %s paramtering because .format and f' ' was not handling the file_path correctly
-                            # It was not including the slashes properly while inserting into the database
-                            file_type = os.path.splitext(file)[1]
-                            insert_file_info = '''INSERT INTO backup_files(Backup_ID, File_Name, File_Type, File_Size, File_Path) 
-                            VALUES(%s, %s, %s, %s, %s)'''
-
-                            cursor.execute(insert_file_info, (backup_id, file, file_type, file_size, file_path))
-
-                            con.commit()
-
-                    messagebox.showinfo("Success", f"Backup completed successfully!\nTotal size: {total_size/(1024*1024)} MB")
-
-                except Exception as e:
-                    con.rollback()
-                    messagebox.showerror("Error", f"An error occurred during backup: {str(e)}")
-
-        backup_button = tk.Button(backup_gui, text="Start Backup", command=backup)
+        backup_button = tk.Button(backup_gui, text="Start Backup", command=call_backup)
         backup_button.grid(row=4, columnspan=3, pady=10)
 
 def restore_utility():
@@ -180,11 +201,10 @@ def restore_utility():
 
     if con is None or not con.is_connected():
         messagebox.showwarning("Error", "Kindly Connect to MySQL Database first!")
-        connection_gui()
+        connection_utility()
 
     else:
-
-        # Create a function just to enter 
+        # Create a function just to enter destination directory
         def dest_path_select():
             id_tup=[]
             restore_id = int(id_entry.get())
@@ -205,22 +225,8 @@ def restore_utility():
                     dest_entry.delete(0, tk.END)
                     dest_entry.insert(0, filedialog.askdirectory())
                 
-                def restore():
-                    cursor.execute(f'SELECT source_path from backup_info where backup_id={restore_id}')
-
-                    src_path=str(cursor.fetchone()[0])
-                    dest_path=str(os.path.normpath(dest_entry.get())) + "\\" + src_path.split('/')[-1]
-
-                    for dirpath, dirnames, filenames in os.walk(src_path):
-                        for file in filenames:
-                            file_path = os.path.normpath(os.path.join(dirpath, file))
-                            rel_path = os.path.relpath(file_path, src_path)
-                            dest_file_path = os.path.normpath(os.path.join(dest_path, rel_path))
-
-                            if not os.path.exists(os.path.dirname(dest_file_path)):
-                                os.makedirs(os.path.dirname(dest_file_path))
-
-                            shutil.copy2(file_path, dest_file_path)            
+                def call_restore():
+                    restore(restore_id, dest_entry)
 
                 dest_entry = tk.Entry(rest_path_sel_gui)
                 dest_entry.grid(row=0, column=1, padx=10, pady=(10,0))
@@ -228,7 +234,7 @@ def restore_utility():
                 browse_dest_path = tk.Button(rest_path_sel_gui, text="Browse", command=browse_dest_path)
                 browse_dest_path.grid(row=0, column=2, padx=10, pady=(10,0))
 
-                start_rest_butt = tk.Button(rest_path_sel_gui, text='Start Restore', command=restore)
+                start_rest_butt = tk.Button(rest_path_sel_gui, text='Start Restore', command=call_restore)
                 start_rest_butt.grid(row=1, columnspan=3, pady=10)
 
         restore_gui = tk.Tk()
@@ -278,31 +284,98 @@ def statistics():
         messagebox.showwarning("Error", "Kindly Connect to MySQL Database first!")
         connection_gui()
     else:
+        query = 'SELECT backup_id, backup_name, total_size FROM backup_info'
+        cursor.execute(query)
+        data = cursor.fetchall()
 
-        cursor.execute('select file_type, sum(file_size) from backup_files group by file_type')
-        backup_info=cursor.fetchall()
-        types=[]
-        size=[]
+        def on_button_click(backup_id):
+            global cursor
 
-        for i in backup_info:
-            size.append(i[1])
-            types.append(i[0])
+            # Fetch typewise file distribution
+            query = f'SELECT file_type, SUM(file_size) FROM backup_files WHERE backup_id={backup_id} GROUP BY file_type'
+            cursor.execute(query)
+            backup_info = cursor.fetchall()
 
-        plt.subplot(1,2,1)
-        plt.pie(size, labels=types)
+            types = []
+            sizes = []
+
+            for item in backup_info:
+                sizes.append(item[1])
+                types.append(item[0])
+
+            # Fetch average file size per file type
+            avg_query = f'SELECT file_type, AVG(file_size) FROM backup_files WHERE backup_id={backup_id} GROUP BY file_type'
+            cursor.execute(avg_query)
+            avg_info = cursor.fetchall()
+
+            avg_types = []
+            avg_sizes = []
+
+            for item in avg_info:
+                avg_types.append(item[0])
+                avg_sizes.append(item[1]/(1024*1024))
+
+            # Fetch top 10 largest files
+            cursor.execute('''
+                SELECT File_Name, File_Size
+                FROM backup_files
+                ORDER BY File_Size DESC
+                LIMIT 10
+            ''')
+            top_files = cursor.fetchall()
+
+            file_names = [file[0] for file in top_files]
+            file_sizes = [file[1]/(1024*1024) for file in top_files]
 
 
-        plt.subplot(1,2,2)
-        plt.pie(size, labels=types)
-        plt.show()
+            # Pie chart for typewise distribution
+            plt.subplot(2, 2, 1)
+            plt.pie(sizes, labels=types, startangle=90, autopct='%1.1f%%', colors=plt.cm.Paired(range(len(types))))
+            plt.title("Typewise Distribution of Files", fontweight='bold')
+
+            # Bar chart for average file size per file type
+            plt.subplot(2, 2, 2)
+            plt.bar(avg_types, avg_sizes, color='skyblue')
+            plt.xlabel('File Type')
+            plt.ylabel('Average File Size (MB)')
+            plt.title('Average File Size per File Type', fontweight='bold')
+
+            # Bar chart for top 10 largest files
+            plt.subplot(2, 1, 2)
+            plt.barh(file_names[::-1], file_sizes[::-1], color='skyblue')  # Invert for descending order
+            plt.xlabel('File Size (MB)')
+            plt.ylabel('File Name')
+            plt.title('Top 10 Largest Files', fontweight='bold')
+            
+            plt.tight_layout()
+            plt.show()
+
+        root = tk.Tk()
+        root.title("Backup Stats")
+
+        # Define the headers
+        headers = ["Backup ID", "Backup Name", "Total Size", "Actions"]
+
+        for i, header in enumerate(headers):
+            tk.Label(root, text=header, font=("Arial", 10, "bold")).grid(row=0, column=i, padx=10, pady=5)
+
+        for i, (backup_id, backup_name, total_size) in enumerate(data, start=1):
+            tk.Label(root, text=backup_id).grid(row=i, column=0, padx=10, pady=5)
+            tk.Label(root, text=backup_name).grid(row=i, column=1, padx=10, pady=5)
+            tk.Label(root, text=total_size).grid(row=i, column=2, padx=10, pady=5)
+            
+            # Add a button in the "Actions" column
+            button = tk.Button(root, text="Stats", command=lambda id=backup_id:on_button_click(id))
+            button.grid(row=i, column=3, padx=10, pady=5)
+
+        root.mainloop()
         
-
 # Creating the main Tkinter window
 root = tk.Tk()
 root.title("Backup and Restore")
 
 # Add all the required buttons into the main window
-connect_button = tk.Button(root, text="Connect To MySQL Database", command=connection_gui)
+connect_button = tk.Button(root, text="Connect To MySQL Database", command=connection_utility)
 connect_button.pack(padx=30, pady=10)
 
 backup_utility_button = tk.Button(root, text="Backup Files", command=backup_utility)
