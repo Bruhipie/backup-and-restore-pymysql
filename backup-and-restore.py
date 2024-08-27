@@ -5,6 +5,7 @@ import datetime
 import shutil
 import os
 import matplotlib.pyplot as plt
+import json
 
 # Defining these as global variables as they would be used across many functions
 con = None
@@ -48,23 +49,66 @@ def mysql_connection(hname, uname, pwd):
     except sql.Error as e:
         messagebox.showerror("Failed", f"{e}\n\nCouldn't connect to MySQL database.\nPlease Try Again!")
 
+def save_connection_info(host, user, password):
+    # Get appdata path from "env"ironment variables 
+    # We could've hard coded the path to appdata but it varies from user to user, so hard coding is not feasible
+
+    if host and user and password:
+        appdata_path = os.path.normpath(os.path.join(os.getenv('APPDATA'), 'PyMySQL Backup Config'))
+        os.makedirs(appdata_path, exist_ok=True)
+        config_file = os.path.join(appdata_path, 'config.json')
+
+        config = {
+            'host': host,
+            'user': user,
+            'password': password
+        }
+
+        try:
+            with open(config_file, 'w') as file:
+                json.dump(config, file, indent=4)
+            messagebox.showinfo("Success", "Connection info saved successfully!")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save connection info: {e}")
+
+    else:
+        messagebox.showerror("Error", "Kindly enter credentials before saving!")
+
+def load_connection_info():
+    appdata_path = os.path.normpath(os.path.join(os.getenv('APPDATA'), 'PyMySQL Backup Config'))
+    config_file = os.path.join(appdata_path, 'config.json')
+
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, 'r') as file:
+                config = json.load(file)
+            return config['host'], config['user'], config['password']
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load connection info: {e}")
+            return None, None, None
+    else:
+        messagebox.showwarning("Warning", "No saved connection info found.")
+        return None, None, None
+
+
 def connection_utility():
     global conn_gui
 
     conn_gui = tk.Toplevel(root)
     conn_gui.title("MySQL Connection")
 
-    tk.Label(conn_gui, text="Host").grid(row=0)
-    tk.Label(conn_gui, text="User").grid(row=1)
-    tk.Label(conn_gui, text="Password").grid(row=2, padx=20)
+    tk.Label(conn_gui, text="Host").grid(row=0, sticky='e')
+    tk.Label(conn_gui, text="User").grid(row=1, sticky='e')
+    tk.Label(conn_gui, text="Password").grid(row=2, sticky='e')
 
-    host_entry = tk.Entry(conn_gui)
-    user_entry = tk.Entry(conn_gui)
-    pwd_entry = tk.Entry(conn_gui, show='*')
+    host_entry = tk.Entry(conn_gui, width=25)
+    user_entry = tk.Entry(conn_gui, width=25)
+    pwd_entry = tk.Entry(conn_gui, show='*', width=25)
 
-    host_entry.grid(row=0, column=1, padx=20, pady=10)
-    user_entry.grid(row=1, column=1, padx=20, pady=10)
-    pwd_entry.grid(row=2, column=1, padx=20, pady=10)
+    host_entry.grid(row=0, column=1, padx=(0, 15), pady=10, columnspan=3)
+    user_entry.grid(row=1, column=1, padx=(0,15), pady=10, columnspan=3)
+    pwd_entry.grid(row=2, column=1, padx=(0,15), pady=10, columnspan=3)
 
     def collect_and_connect():
         hname = host_entry.get()
@@ -72,8 +116,27 @@ def connection_utility():
         pwd = pwd_entry.get()
         mysql_connection(hname, uname, pwd)
 
+    def save_info():
+        save_connection_info(host_entry.get(), user_entry.get(), pwd_entry.get())
+
+    def load_info():
+        host, user, password = load_connection_info()
+        if host:
+            host_entry.delete(0, tk.END)
+            host_entry.insert(0, host)
+            user_entry.delete(0, tk.END)
+            user_entry.insert(0, user)
+            pwd_entry.delete(0, tk.END)
+            pwd_entry.insert(0, password)
+
+    save_button = tk.Button(conn_gui, text="Save Info", command=save_info)
+    save_button.grid(row=3, column=0, pady=10, padx=(15,10), sticky='e')
+
+    load_button = tk.Button(conn_gui, text="Load Info", command=load_info)
+    load_button.grid(row=3, column=2, pady=10, padx=(10,10), sticky='w')
+
     conn_button = tk.Button(conn_gui, text="Connect to Database", command=collect_and_connect)
-    conn_button.grid(row=4, columnspan=2, pady=15)
+    conn_button.grid(row=3, column=3, pady=15, padx=(10,15))
 
 def backup(src_entry, dest_entry, name_entry):
     src_path = os.path.normpath(src_entry.get())
@@ -88,7 +151,7 @@ def backup(src_entry, dest_entry, name_entry):
         total_size = 0
 
         try:
-            dest_path = dest_path + "\\" + name
+            dest_path = os.path.join(dest_path, name)
             for dirpath, dirnames, filenames in os.walk(src_path):
                 for file in filenames:
                     file_path = os.path.join(dirpath, file)
@@ -97,6 +160,7 @@ def backup(src_entry, dest_entry, name_entry):
             # Insert backup details into the database
             # We used %s formatting because .format and f' ' were not handling the file_path correctly
             # It was not including the slashes properly while inserting into the database
+
             insert_backup_info = '''INSERT INTO backup_info(Date, Backup_Name, Source_Path, Backup_Path, Total_Size)
             VALUES (%s, %s, %s, %s, %s)'''
 
@@ -123,7 +187,7 @@ def backup(src_entry, dest_entry, name_entry):
 
                     cursor.execute(insert_file_info, (backup_id, file, file_type, file_size, file_path))
 
-                    con.commit()
+            con.commit()
 
             messagebox.showinfo("Success", f"Backup completed successfully!\nTotal size: {total_size/(1024*1024)} MB")
 
@@ -136,6 +200,7 @@ def backup_utility():
 
     # con will have None value if connection was never established
     # con.is_connected()==False will be True if connection was tried to be established but failed to take place for some reason
+
     if con is None or not con.is_connected():
         messagebox.showwarning("Error", "Kindly Connect to MySQL Database first!")
         connection_utility()
@@ -204,8 +269,9 @@ def restore_utility():
         connection_utility()
 
     else:
-        # Create a function just to enter destination directory
         def dest_path_select():
+            # Create a function just for destination directory input
+
             id_tup=[]
             restore_id = int(id_entry.get())
             cursor.execute('SELECT backup_id from backup_info')
@@ -251,7 +317,6 @@ def restore_utility():
         table.heading('date', text='Date')
         table.heading('src_path', text='Source Path')
         table.heading('total_size', text='Total Size (MB)')
-
         
         #Add columns to the table
         table.column('id', width=75, anchor='center')
@@ -265,8 +330,9 @@ def restore_utility():
 
         table.pack()
 
+        # We create a frame to better handle all the underheld widgets
         input_frame = tk.Frame(restore_gui)
-        input_frame.pack(pady=(10, 10))  # Center the frame with vertical padding
+        input_frame.pack(pady=(10, 10))
 
         # Place the label and entry side by side inside the frame
         tk.Label(input_frame, text="Enter Backup ID to Restore").pack(side='left', padx=(35, 5))
@@ -295,8 +361,8 @@ def statistics(backup_id, stat_gui):
     top_files_button.grid(row=3, columnspan=2, padx=10, pady=10)
 
     def typewise_chart(backup_id):
-
         # Fetch typewise file distribution
+
         query = f'SELECT file_type, SUM(file_size) FROM backup_files WHERE backup_id={backup_id} GROUP BY file_type'
         cursor.execute(query)
         backup_info = cursor.fetchall()
@@ -313,6 +379,7 @@ def statistics(backup_id, stat_gui):
         
     def avg_file_size(backup_id):
         # Fetch average file size per file type
+
         avg_query = f'SELECT file_type, AVG(file_size) FROM backup_files WHERE backup_id={backup_id} GROUP BY file_type'
         cursor.execute(avg_query)
         avg_info = cursor.fetchall()
@@ -332,6 +399,7 @@ def statistics(backup_id, stat_gui):
 
     def largest_files(backup_id):
         # Fetch top 10 largest files
+
         cursor.execute(f'''
             SELECT File_Name, File_Size
             FROM backup_files
